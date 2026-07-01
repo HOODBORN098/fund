@@ -1,0 +1,490 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+enum MemberRole {
+  member
+  treasurer
+  chairman
+  admin
+  secretary
+}
+
+enum MemberStatus {
+  invited
+  pending
+  active
+  suspended
+  removed
+}
+
+enum CycleStatus {
+  draft
+  open
+  in_progress
+  completed
+  partial_completion
+}
+
+enum RotationMethod {
+  fixed_order
+  lottery
+}
+
+enum TransactionStatus {
+  initiated
+  pending
+  completed
+  failed
+  reversed
+}
+
+enum TransactionType {
+  deposit
+  contribution
+  payout
+  welfare_claim
+  penalty
+  transfer
+  reversal
+  withdrawal
+}
+
+enum ClaimStatus {
+  pending_approval
+  approved
+  rejected
+  pending_funds
+  disbursed
+}
+
+enum EmergencyType {
+  medical
+  funeral
+  disaster
+}
+
+enum VoteSubjectType {
+  welfare_claim
+  rule_change
+  rotation_swap
+  motion
+}
+
+enum VoteChoice {
+  approve
+  reject
+  abstain
+}
+
+// ─── IDENTITY & ACCESS ────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  phone        String   @unique
+  passwordHash String   @map("password_hash")
+  fullName     String   @map("full_name")
+  isVerified   Boolean  @default(false) @map("is_verified")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  sessions        Session[]
+  memberships     Membership[]
+  createdChamas   Chama[]       @relation("ChamaCreator")
+  invitationsSent Invitation[]  @relation("InviterRelation")
+  actedAsSuspender Membership[] @relation("SuspenderRelation")
+  auditLogs       AuditLog[]
+  votesCreated    Vote[]
+  claimsVetoed    WelfareClaim[] @relation("VetoRelation")
+  transactionsActed Transaction[] @relation("ActorRelation")
+
+  @@map("users")
+}
+
+model Session {
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  refreshTokenHash String   @map("refresh_token_hash")
+  expiresAt        DateTime @map("expires_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// ─── MEMBERSHIP ───────────────────────────────────────────────────────────────
+
+model Chama {
+  id           String   @id @default(uuid())
+  name         String
+  type         String   @default("rosca_welfare")
+  constitution Json     @default("{}")
+  createdById  String   @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  createdBy       User          @relation("ChamaCreator", fields: [createdById], references: [id])
+  memberships     Membership[]
+  invitations     Invitation[]
+  roscaCycles     RoscaCycle[]
+  wallets         Wallet[]
+  transactions    Transaction[]
+  welfareClaims   WelfareClaim[]
+  votes           Vote[]
+  rules           Rule[]
+  auditLogs       AuditLog[]
+  domainEvents    DomainEvent[]
+
+  @@map("chamas")
+}
+
+model Membership {
+  id               String       @id @default(uuid())
+  userId           String       @map("user_id")
+  chamaId          String       @map("chama_id")
+  role             MemberRole   @default(member)
+  status           MemberStatus @default(pending)
+  joinedAt         DateTime?    @map("joined_at")
+  suspendedAt      DateTime?    @map("suspended_at")
+  suspendedById    String?      @map("suspended_by")
+  suspendedReason  String?      @map("suspended_reason")
+
+  user           User          @relation(fields: [userId], references: [id])
+  chama          Chama         @relation(fields: [chamaId], references: [id])
+  suspendedBy    User?         @relation("SuspenderRelation", fields: [suspendedById], references: [id])
+  rotationPositions RotationPosition[]
+  contributionRecords ContributionRecord[]
+  penalties      Penalty[]
+  payoutsReceived Payout[]
+  welfareClaims  WelfareClaim[]
+  voteBallots    VoteBallot[]
+  swapRequestsFrom RotationSwapRequest[] @relation("SwapRequester")
+  swapRequestsTo   RotationSwapRequest[] @relation("SwapTarget")
+
+  @@unique([userId, chamaId])
+  @@map("memberships")
+}
+
+model Invitation {
+  id           String       @id @default(uuid())
+  chamaId      String       @map("chama_id")
+  inviterId    String       @map("inviter_id")
+  phone        String
+  email        String?
+  proposedRole MemberRole   @default(member) @map("proposed_role")
+  token        String       @unique
+  expiresAt    DateTime     @map("expires_at")
+  acceptedAt   DateTime?    @map("accepted_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  chama   Chama @relation(fields: [chamaId], references: [id])
+  inviter User  @relation("InviterRelation", fields: [inviterId], references: [id])
+
+  @@map("invitations")
+}
+
+// ─── FINANCE ──────────────────────────────────────────────────────────────────
+
+model Wallet {
+  id        String   @id @default(uuid())
+  ownerType String   @map("owner_type")
+  ownerId   String   @map("owner_id")
+  chamaId   String?  @map("chama_id")
+  balance   BigInt   @default(0)
+  currency  String   @default("KES")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  chama          Chama?        @relation(fields: [chamaId], references: [id])
+  debitedIn      Transaction[] @relation("FromWallet")
+  creditedIn     Transaction[] @relation("ToWallet")
+  ledgerEntries  LedgerEntry[]
+
+  @@unique([ownerType, ownerId, chamaId])
+  @@map("wallets")
+}
+
+model Transaction {
+  id             String            @id @default(uuid())
+  chamaId        String            @map("chama_id")
+  type           TransactionType
+  fromWalletId   String?           @map("from_wallet_id")
+  toWalletId     String?           @map("to_wallet_id")
+  amount         BigInt
+  status         TransactionStatus @default(initiated)
+  idempotencyKey String?           @unique @map("idempotency_key")
+  reference      String?
+  reversesId     String?           @unique @map("reverses_txn_id")
+  reversedById   String?           @unique @map("reversed_by_txn_id")
+  metadata       Json              @default("{}")
+  actorId        String?           @map("actor_id")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  completedAt    DateTime?         @map("completed_at")
+
+  chama        Chama         @relation(fields: [chamaId], references: [id])
+  fromWallet   Wallet?       @relation("FromWallet", fields: [fromWalletId], references: [id])
+  toWallet     Wallet?       @relation("ToWallet", fields: [toWalletId], references: [id])
+  actor        User?         @relation("ActorRelation", fields: [actorId], references: [id])
+  reverses     Transaction?  @relation("ReversalLink", fields: [reversesId], references: [id])
+  reversedBy   Transaction?  @relation("ReversalLink")
+  ledgerEntries LedgerEntry[]
+
+  @@map("transactions")
+}
+
+model LedgerEntry {
+  id            String   @id @default(uuid())
+  transactionId String   @map("transaction_id")
+  walletId      String   @map("wallet_id")
+  direction     String
+  amount        BigInt
+  balanceAfter  BigInt   @map("balance_after")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  transaction Transaction @relation(fields: [transactionId], references: [id])
+  wallet      Wallet      @relation(fields: [walletId], references: [id])
+
+  @@map("ledger_entries")
+}
+
+// ─── ROSCA ────────────────────────────────────────────────────────────────────
+
+model RoscaCycle {
+  id                   String         @id @default(uuid())
+  chamaId              String         @map("chama_id")
+  cycleNumber          Int            @map("cycle_number")
+  name                 String
+  contributionAmount   BigInt         @map("contribution_amount")
+  frequency            String
+  rotationMethod       RotationMethod @default(fixed_order) @map("rotation_method")
+  status               CycleStatus    @default(draft)
+  contributionDeadline DateTime       @map("contribution_deadline")
+  startedById          String?        @map("started_by")
+  createdAt            DateTime       @default(now()) @map("created_at")
+
+  chama               Chama               @relation(fields: [chamaId], references: [id])
+  rotationPositions   RotationPosition[]
+  contributionRecords ContributionRecord[]
+  payout              Payout?
+  swapRequests        RotationSwapRequest[]
+
+  @@unique([chamaId, cycleNumber])
+  @@map("rosca_cycles")
+}
+
+model RotationPosition {
+  id           String @id @default(uuid())
+  cycleId      String @map("cycle_id")
+  membershipId String @map("membership_id")
+  position     Int
+  status       String @default("pending")
+
+  cycle      RoscaCycle @relation(fields: [cycleId], references: [id])
+  membership Membership @relation(fields: [membershipId], references: [id])
+
+  @@unique([cycleId, position])
+  @@unique([cycleId, membershipId])
+  @@map("rotation_positions")
+}
+
+model ContributionRecord {
+  id           String   @id @default(uuid())
+  cycleId      String   @map("cycle_id")
+  membershipId String   @map("membership_id")
+  transactionId String? @map("transaction_id")
+  amount       BigInt
+  status       String   @default("pending")
+  paidAt       DateTime? @map("paid_at")
+
+  cycle      RoscaCycle @relation(fields: [cycleId], references: [id])
+  membership Membership @relation(fields: [membershipId], references: [id])
+
+  @@unique([cycleId, membershipId])
+  @@map("contribution_records")
+}
+
+model Penalty {
+  id            String   @id @default(uuid())
+  membershipId  String   @map("membership_id")
+  cycleId       String?  @map("cycle_id")
+  type          String
+  amount        BigInt?
+  transactionId String?  @map("transaction_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  membership Membership @relation(fields: [membershipId], references: [id])
+
+  @@map("penalties")
+}
+
+model Payout {
+  id                    String   @id @default(uuid())
+  cycleId               String   @unique @map("cycle_id")
+  recipientMembershipId String   @map("recipient_membership_id")
+  amount                BigInt
+  transactionId         String?  @map("transaction_id")
+  releasedAt            DateTime? @map("released_at")
+
+  cycle      RoscaCycle @relation(fields: [cycleId], references: [id])
+  membership Membership @relation(fields: [recipientMembershipId], references: [id])
+
+  @@map("payouts")
+}
+
+model RotationSwapRequest {
+  id                    String @id @default(uuid())
+  cycleId               String @map("cycle_id")
+  requesterMembershipId String @map("requester_membership_id")
+  targetMembershipId    String @map("target_membership_id")
+  voteId                String? @map("vote_id")
+  status                String  @default("pending_vote")
+
+  cycle      RoscaCycle @relation(fields: [cycleId], references: [id])
+  requester  Membership @relation("SwapRequester", fields: [requesterMembershipId], references: [id])
+  target     Membership @relation("SwapTarget", fields: [targetMembershipId], references: [id])
+
+  @@map("rotation_swap_requests")
+}
+
+// ─── WELFARE ──────────────────────────────────────────────────────────────────
+
+model WelfareClaim {
+  id                   String        @id @default(uuid())
+  chamaId              String        @map("chama_id")
+  claimantMembershipId String        @map("claimant_membership_id")
+  emergencyType        EmergencyType @map("emergency_type")
+  amount               BigInt
+  description          String
+  evidenceUrls         String[]      @default([]) @map("evidence_urls")
+  status               ClaimStatus   @default(pending_approval)
+  voteId               String?       @map("vote_id")
+  rejectedReason       String?       @map("rejected_reason")
+  vetoedById           String?       @map("vetoed_by")
+  submittedAt          DateTime      @default(now()) @map("submitted_at")
+
+  chama          Chama               @relation(fields: [chamaId], references: [id])
+  claimant       Membership          @relation(fields: [claimantMembershipId], references: [id])
+  vetoedBy       User?               @relation("VetoRelation", fields: [vetoedById], references: [id])
+  vote           Vote?               @relation(fields: [voteId], references: [id])
+  disbursement   WelfareDisbursement?
+
+  @@map("welfare_claims")
+}
+
+model WelfareDisbursement {
+  id            String   @id @default(uuid())
+  claimId       String   @unique @map("claim_id")
+  transactionId String?  @map("transaction_id")
+  disbursedAt   DateTime? @map("disbursed_at")
+
+  claim WelfareClaim @relation(fields: [claimId], references: [id])
+
+  @@map("welfare_disbursements")
+}
+
+// ─── GOVERNANCE ───────────────────────────────────────────────────────────────
+
+model Vote {
+  id                String          @id @default(uuid())
+  chamaId           String          @map("chama_id")
+  subjectType       VoteSubjectType @map("subject_type")
+  subjectId         String          @map("subject_id")
+  title             String
+  description       String?
+  requiredThreshold Decimal         @map("required_threshold")
+  quorumThreshold   Decimal         @default(0.6) @map("quorum_threshold")
+  deadline          DateTime?
+  status            String          @default("open")
+  createdById       String?         @map("created_by")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  closedAt          DateTime?       @map("closed_at")
+
+  chama        Chama          @relation(fields: [chamaId], references: [id])
+  createdBy    User?          @relation(fields: [createdById], references: [id])
+  ballots      VoteBallot[]
+  welfareClaims WelfareClaim[]
+
+  @@map("votes")
+}
+
+model VoteBallot {
+  id           String     @id @default(uuid())
+  voteId       String     @map("vote_id")
+  membershipId String     @map("membership_id")
+  choice       VoteChoice
+  castAt       DateTime   @default(now()) @map("cast_at")
+
+  vote       Vote       @relation(fields: [voteId], references: [id])
+  membership Membership @relation(fields: [membershipId], references: [id])
+
+  @@unique([voteId, membershipId])
+  @@map("vote_ballots")
+}
+
+model Rule {
+  id            String   @id @default(uuid())
+  chamaId       String   @map("chama_id")
+  key           String
+  value         Json
+  effectiveFrom DateTime? @map("effective_from")
+  voteId        String?  @map("vote_id")
+
+  chama Chama @relation(fields: [chamaId], references: [id])
+
+  @@unique([chamaId, key])
+  @@map("rules")
+}
+
+// ─── SUPPORTING DOMAINS ───────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  chamaId     String?  @map("chama_id")
+  actorId     String?  @map("actor_id")
+  eventType   String   @map("event_type")
+  subjectType String?  @map("subject_type")
+  subjectId   String?  @map("subject_id")
+  payload     Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  chama Chama? @relation(fields: [chamaId], references: [id])
+  actor User?  @relation(fields: [actorId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  channel   String
+  template  String
+  payload   Json     @default("{}")
+  status    String   @default("queued")
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
+
+model DomainEvent {
+  id            String   @id @default(uuid())
+  eventType     String   @map("event_type")
+  chamaId       String?  @map("chama_id")
+  actorId       String?  @map("actor_id")
+  payload       Json
+  correlationId String?  @map("correlation_id")
+  processedAt   DateTime? @map("processed_at")
+  failedAt      DateTime? @map("failed_at")
+  failureReason String?  @map("failure_reason")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  chama Chama? @relation(fields: [chamaId], references: [id])
+
+  @@map("domain_events")
+}
