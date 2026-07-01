@@ -96,7 +96,7 @@ export default function TransactionsPage() {
 
           {/* Filters */}
           <div className="flex flex-wrap items-center gap-3 bg-surface-container-lowest border border-outline-variant rounded-xl p-4">
-            <select className="px-3 py-2 border border-outline-variant rounded-lg bg-surface outline-none"
+            <select className="pl-3 pr-8 py-2 border border-outline-variant rounded-lg bg-surface outline-none"
               value={filters.category} onChange={e => { setFilters(p => ({ ...p, category: e.target.value })); setPage(1); }}>
               <option value="all">All Categories</option>
               <option value="rosca">ROSCA</option>
@@ -104,7 +104,7 @@ export default function TransactionsPage() {
               <option value="deposit">Deposits</option>
               <option value="withdrawal">Withdrawals</option>
             </select>
-            <select className="px-3 py-2 border border-outline-variant rounded-lg bg-surface outline-none"
+            <select className="pl-3 pr-8 py-2 border border-outline-variant rounded-lg bg-surface outline-none"
               value={filters.status} onChange={e => { setFilters(p => ({ ...p, status: e.target.value })); setPage(1); }}>
               <option value="all">All Statuses</option>
               <option value="success">Success</option>

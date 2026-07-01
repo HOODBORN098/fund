@@ -36,8 +36,8 @@ export default function TopNavBar({
     );
   }
 
-  const displayName = userName || auth?.user?.name || 'Guest';
-  const displayRole = role || auth?.user?.role || '';
+  const displayName = userName || auth?.user?.fullName || auth?.user?.name || 'Guest';
+  const displayRole = role || auth?.activeMembership?.role || auth?.user?.role || '';
   const chamaName = auth?.activeChama?.name || 'Select Chama';
 
   return (

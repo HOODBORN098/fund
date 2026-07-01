@@ -29,7 +29,7 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const user = await login({ identifier: form.identifier, password: form.password });
+      const user = await login({ email: form.identifier, password: form.password });
       const dest = user?.role === 'member' ? '/dashboard/member' : '/dashboard/admin';
       navigate(from !== '/login' ? from : dest, { replace: true });
     } catch (err) {

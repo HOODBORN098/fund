@@ -10,6 +10,9 @@ export function AuthProvider({ children }) {
   const [activeChama, setActiveChama] = useState(() => {
     try { return JSON.parse(localStorage.getItem('fl_chama')); } catch { return null; }
   });
+  const [activeMembership, setActiveMembership] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('fl_membership')); } catch { return null; }
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -30,13 +33,28 @@ export function AuthProvider({ children }) {
         const u = data.user || data;
         setUser(u);
         localStorage.setItem('fl_user', JSON.stringify(u));
+
+        // Auto-pick chama if none stored yet
+        const storedChama = localStorage.getItem('fl_chama');
+        if (!storedChama && data.memberships?.length) {
+          const activeMem = data.memberships.find(m => m.status === 'active') || data.memberships[0];
+          const chama = activeMem?.chama || activeMem;
+          if (chama?.id) {
+            localStorage.setItem('fl_chama', JSON.stringify(chama));
+            setActiveChama(chama);
+            localStorage.setItem('fl_membership', JSON.stringify(activeMem));
+            setActiveMembership(activeMem);
+          }
+        }
       })
       .catch(() => {
         localStorage.removeItem('fl_token');
         localStorage.removeItem('fl_user');
         localStorage.removeItem('fl_chama');
+        localStorage.removeItem('fl_membership');
         setUser(null);
         setActiveChama(null);
+        setActiveMembership(null);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -51,10 +69,18 @@ export function AuthProvider({ children }) {
     localStorage.setItem('fl_user', JSON.stringify(u));
     setUser(u);
 
-    // If backend returns default chama, store it
-    if (data.chama) {
-      localStorage.setItem('fl_chama', JSON.stringify(data.chama));
-      setActiveChama(data.chama);
+    // Auto-pick the first active chama + membership from login response
+    const activeMem = data.memberships?.length
+      ? (data.memberships.find(m => m.status === 'active') || data.memberships[0])
+      : null;
+    const chamaSource = data.chama || activeMem?.chama || null;
+    if (chamaSource?.id) {
+      localStorage.setItem('fl_chama', JSON.stringify(chamaSource));
+      setActiveChama(chamaSource);
+    }
+    if (activeMem) {
+      localStorage.setItem('fl_membership', JSON.stringify(activeMem));
+      setActiveMembership(activeMem);
     }
     return u;
   }, []);
@@ -64,21 +90,24 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('fl_token');
     localStorage.removeItem('fl_user');
     localStorage.removeItem('fl_chama');
+    localStorage.removeItem('fl_membership');
     setUser(null);
     setActiveChama(null);
+    setActiveMembership(null);
   }, []);
 
-  const switchChama = useCallback(async (chama) => {
+  const switchChama = useCallback(async (chama, membership) => {
     localStorage.setItem('fl_chama', JSON.stringify(chama));
     setActiveChama(chama);
+    if (membership) {
+      localStorage.setItem('fl_membership', JSON.stringify(membership));
+      setActiveMembership(membership);
+    }
   }, []);
 
-  // Granular role flags — BR-MEM-003 (Role Permissions) treats treasurer,
-  // chairman, and admin as having DISTINCT authorities, not interchangeable
-  // ones. Use the specific flag that matches the rule you're enforcing;
-  // only fall back to the broad `isAdmin` for things genuinely open to
-  // any of the three (e.g. "show the elevated nav section").
-  const role = user?.role;
+  // Role comes from the active membership, not the user object
+  // (BR-MEM-003: roles are per-chama, stored on Membership, not User)
+  const role = activeMembership?.role || user?.role;
   const isTreasurer = role === 'treasurer';
   const isChairman  = role === 'chairman';
   const isAdminRole = role === 'admin';
@@ -86,23 +115,17 @@ export function AuthProvider({ children }) {
   const value = {
     user,
     activeChama,
+    activeMembership,
     loading,
     error,
     isAuthenticated: !!user,
-    // Broad "is this an officer of some kind" flag — keep using this only
-    // for UI that's genuinely role-agnostic (e.g. which dashboard to land on).
     isAdmin: isAdminRole || isTreasurer || isChairman,
     isTreasurer,
     isChairman,
     isAdminRole,
-    // BR-GOV-001: only Treasurer initiates ROSCA cycles/payouts.
-    // Admin gets an override since they own chama configuration generally.
     canManageRosca: isTreasurer || isAdminRole,
-    // WF-MEM-002: suspension is a Chairman/Admin action, not Treasurer's.
     canManageMembers: isChairman || isAdminRole,
-    // BR-FIN-002 / WF-FIN-002: reversal is Treasurer/Admin only.
     canReverseTransactions: isTreasurer || isAdminRole,
-    // BR-GOV-002: Chairman can veto a welfare claim outright.
     canVetoClaim: isChairman || isAdminRole,
     login,
     logout,

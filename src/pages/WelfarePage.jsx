@@ -12,7 +12,12 @@ function NewClaimModal({ open, onClose, chamaId, onSuccess }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await mutate({ ...form, amount: Number(form.amount) });
+      await mutate({ 
+        type: form.type, 
+        amount: Number(form.amount), 
+        description: form.description, 
+        evidenceUrls: form.supporting ? [form.supporting] : []
+      });
       toast('Welfare claim submitted for review', 'success');
       onSuccess();
       onClose();
@@ -20,6 +25,16 @@ function NewClaimModal({ open, onClose, chamaId, onSuccess }) {
     } catch (_) {}
   };
   const f = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setForm(p => ({ ...p, supporting: reader.result }));
+      reader.readAsDataURL(file);
+    } else {
+      setForm(p => ({ ...p, supporting: '' }));
+    }
+  };
   return (
     <Modal open={open} onClose={onClose} title="Submit Welfare Claim" size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -49,9 +64,10 @@ function NewClaimModal({ open, onClose, chamaId, onSuccess }) {
             placeholder="Provide detailed context for the welfare committee…" required />
         </div>
         <div>
-          <label className="block font-label-md text-label-md text-on-surface-variant mb-1">Supporting Document URL (optional)</label>
-          <input className="w-full p-3 border border-outline-variant rounded-lg bg-surface-container-low outline-none focus:ring-2 focus:ring-primary"
-            value={form.supporting} onChange={f('supporting')} placeholder="e.g. https://drive.google.com/…" />
+          <label className="block font-label-md text-label-md text-on-surface-variant mb-1">Supporting Document (Image) *</label>
+          <input className="w-full p-2 border border-outline-variant rounded-lg bg-surface-container-low outline-none focus:ring-2 focus:ring-primary file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-on-primary hover:file:bg-primary/90"
+            type="file" accept="image/*" onChange={handleFileChange} required />
+          {form.supporting && <img src={form.supporting} alt="Preview" className="mt-2 h-20 w-auto rounded object-cover" />}
         </div>
         <div className="flex gap-3 pt-2">
           <button type="button" onClick={onClose} className="flex-1 py-2.5 border border-outline rounded-lg font-label-md">Cancel</button>
@@ -70,7 +86,8 @@ export default function WelfarePage() {
   const [claimOpen, setClaimOpen] = useState(false);
 
   const { data, loading, error, refetch } = useApi(
-    () => Promise.all([welfareApi.claims(chamaId), welfareApi.balance(chamaId)]).then(([claims, bal]) => ({ claims, balance: bal })),
+    () => Promise.all([welfareApi.claims(chamaId), welfareApi.balance(chamaId)])
+            .then(([claimsRes, bal]) => ({ claims: claimsRes.claims ?? claimsRes, balance: bal })),
     [chamaId]
   );
 
@@ -162,11 +179,18 @@ export default function WelfarePage() {
                         <div className="flex items-start justify-between">
                           <div>
                             <p className="font-title-md text-title-md text-primary">{claim.memberName}</p>
-                            <p className="font-body-sm text-body-sm text-on-surface-variant capitalize">{claim.type?.replace('_', ' ')} • {claim.submittedAt}</p>
+                            <p className="font-body-sm text-body-sm text-on-surface-variant capitalize">{claim.type?.replace('_', ' ')} • {new Date(claim.submittedAt).toLocaleDateString()}</p>
                             <p className="font-body-md text-body-md text-on-surface mt-1">{claim.description}</p>
+                            {claim.evidenceUrls?.length > 0 && (
+                              <div className="mt-2 flex gap-2">
+                                {claim.evidenceUrls.map((url, idx) => (
+                                  <img key={idx} src={url} alt="Evidence" className="h-16 w-16 object-cover rounded border border-outline-variant" />
+                                ))}
+                              </div>
+                            )}
                           </div>
                           <div className="text-right ml-4">
-                            <p className="font-title-lg text-title-lg text-primary">{claim.amount}</p>
+                            <p className="font-title-lg text-title-lg text-primary">KES {claim.amount}</p>
                             <StatusBadge status={claim.status} />
                           </div>
                         </div>

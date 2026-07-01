@@ -24,7 +24,7 @@ const MISSED_CONTRIBUTION_PENALTIES = [
 
 export default function SetupPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, switchChama } = useAuth();
   const [step, setStep] = useState(1);
   const [error, setError] = useState('');
 
@@ -70,10 +70,10 @@ export default function SetupPage() {
   const handleFinish = async () => {
     setError('');
     try {
-      await registerUser(account);
-      await login({ identifier: account.email, password: account.password });
+      await registerUser({ fullName: account.name, email: account.email, phone: account.phone, password: account.password });
+      await login({ email: account.email, password: account.password });
 
-      await createChama({
+      const chamaResult = await createChama({
         type: 'rosca',
         name: chamaDetails.name,
         targetMemberCount: Number(chamaDetails.memberCount),
@@ -88,6 +88,11 @@ export default function SetupPage() {
           welfareMaxClaimPercent: chamaDetails.welfareMaxClaimPercent,
         },
       });
+
+      // Set the newly created chama + membership so the dashboard has a chamaId and correct role
+      const newChama = chamaResult?.chama || chamaResult;
+      const newMembership = chamaResult?.membership || null;
+      if (newChama?.id) await switchChama(newChama, newMembership);
 
       toast('Chama created successfully!', 'success');
       navigate('/dashboard/admin', { replace: true });
